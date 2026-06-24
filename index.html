@@ -12,7 +12,7 @@
   <!-- 隱藏的 HTML5 音訊標籤：用來強制啟用 iPhone 藍牙媒體通道 -->
   <audio id="bluetooth-hack-audio" src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAAAA" preload="auto"></audio>
   
-  <!-- 新增：用來播放自訂越文的專用音訊標籤，避免手機阻擋背景新建立的音檔 -->
+  <!-- 新增：用來播放自訂越文的專用音訊標籤 -->
   <audio id="custom-vi-audio" preload="auto"></audio>
 
   <!-- 頂部資訊列 -->
@@ -29,7 +29,7 @@
     <!-- 顯示地點與即時溫濕度 -->
     <div class="text-center md:text-right bg-white/50 px-4 py-2 rounded-lg shadow-sm">
       <div class="flex items-center justify-center md:justify-end gap-2">
-        <div id="location-name" class="text-xl font-bold text-gray-800">📍 嘉義縣 大林鎮</div>
+        <div id="location-name" class="text-xl font-bold text-gray-800">📍 石龜溪工區</div>
         <button onclick="fetchWeather()" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded shadow-sm border border-gray-300" title="強制重新抓取氣象">🔄</button>
       </div>
       <div id="weather-info" class="text-sm text-gray-700 mt-1 font-medium">資料更新中...</div>
@@ -79,18 +79,28 @@
       <div class="flex items-start gap-2">
         <input type="checkbox" id="autoFetch-cb" checked onchange="toggleAutoFetch(this.checked)" class="w-4 h-4 mt-1 cursor-pointer" />
         <label for="autoFetch-cb" class="text-xs font-bold text-gray-700 cursor-pointer leading-tight">
-          啟用大林即時氣象連線 (每15分鐘自動更新)
+          啟用氣象局即時連線 (每15分更新)
         </label>
       </div>
+    </div>
+    
+    <!-- 氣象署連線一鍵診斷按鈕 -->
+    <div class="mt-2 pt-2 border-t border-gray-300">
+      <button onclick="diagnoseCWA()" class="w-full px-3 py-2 bg-purple-100 text-purple-800 rounded font-bold hover:bg-purple-200 border border-purple-300 transition-colors">
+        🩺 氣象署連線診斷
+      </button>
     </div>
   </div>
 
   <script>
     // ==========================================
-    // 氣象署 API 授權碼 (直接寫死在程式碼中)
-    // 請將引號內的文字替換為您的 CWA 授權碼
+    // 氣象署 API 授權碼
     // ==========================================
     const CWA_API_KEY = 'CWA-6516C4AD-3592-4393-9385-97D49A93D1B2';
+
+    // 🎯 您指定的工作區域座標
+    const TARGET_LAT = 23.624321;
+    const TARGET_LON = 120.438239;
 
     // --- 狀態變數 ---
     let timeStr = '--:--';
@@ -98,15 +108,13 @@
     let systemStatus = 'active'; 
     let isAutoFetch = true;
     let weatherData = { temp: null, humidity: null, fetching: false, errorMsg: null, heatIndex: null };
-    let locationNameStr = '📍 嘉義縣 大林鎮';
+    let locationNameStr = '📍 石龜溪工區';
 
     let isVoiceEnabled = true;
     let broadcastInterval = 60; 
     let lastBroadcastTime = null;
 
     // --- 等級與語音設定 ---
-    // 若要使用您自己的語音檔案，請在對應等級的 customAudioVi 填入網址，例如: customAudioVi: 'https://example.com/audio/level4-vi.mp3'
-    // 若保持空白 ''，則會自動使用系統預設的越文朗讀 (TTS)
     const levelConfigs = {
       1: { 
         text: '第1級', bg: 'bg-green-400', textColor: 'text-green-900', note: '注意', 
@@ -165,26 +173,27 @@
       if (weatherData.fetching) {
         weatherInfoEl.innerText = '資料更新中...';
       } else if (weatherData.temp !== null) {
-        // 新增：把算出來的熱指數也顯示在畫面上，方便現場查核
         weatherInfoEl.innerText = `氣溫 ${weatherData.temp}°C | 濕度 ${weatherData.humidity}% (熱指數 ${weatherData.heatIndex})`;
       } else if (weatherData.errorMsg) {
         weatherInfoEl.innerText = `氣象連線異常 (${weatherData.errorMsg})`;
       } else {
-        weatherInfoEl.innerText = '無法取得氣象或定位資料';
+        weatherInfoEl.innerText = '無法取得氣象資料';
       }
 
       document.getElementById('location-name').innerText = locationNameStr;
 
-      intervalContainer.innerHTML = '';
-      [5, 15, 30, 60].forEach(mins => {
-        let btn = document.createElement('button');
-        btn.innerText = mins === 60 ? '1小時' : `${mins}分鐘`;
-        btn.onclick = () => setIntervalSetting(mins);
-        btn.className = broadcastInterval === mins 
-          ? "px-3 py-1 rounded font-bold text-xs transition-colors bg-blue-500 text-white"
-          : "px-3 py-1 rounded font-bold text-xs transition-colors bg-gray-200 text-gray-700 hover:bg-gray-300";
-        intervalContainer.appendChild(btn);
-      });
+      if(intervalContainer) {
+        intervalContainer.innerHTML = '';
+        [5, 15, 30, 60].forEach(mins => {
+          let btn = document.createElement('button');
+          btn.innerText = mins === 60 ? '1小時' : `${mins}分鐘`;
+          btn.onclick = () => setIntervalSetting(mins);
+          btn.className = broadcastInterval === mins 
+            ? "px-3 py-1 rounded font-bold text-xs transition-colors bg-blue-500 text-white"
+            : "px-3 py-1 rounded font-bold text-xs transition-colors bg-gray-200 text-gray-700 hover:bg-gray-300";
+          intervalContainer.appendChild(btn);
+        });
+      }
     }
 
     function setLevel(lvl) {
@@ -213,17 +222,14 @@
 
     // 計算熱指數與判斷等級
     function updateWeatherLevel() {
-      if (weatherData.originalTemp === undefined || weatherData.originalTemp === null) return; // 確保有原始資料
+      if (weatherData.originalTemp === undefined || weatherData.originalTemp === null) return;
 
       let finalTemp = parseFloat(weatherData.originalTemp);
       let finalHum = parseFloat(weatherData.originalHum);
 
-      // 畫面顯示：對齊氣象署習慣，四捨五入取整數
       weatherData.temp = Math.round(finalTemp);
       weatherData.humidity = Math.round(finalHum);
 
-      // --- 勞動部熱指數 (Heat Index) 標準演算法 ---
-      // 底層計算仍使用帶有小數點的 finalTemp，確保分級精準度
       let tc = finalTemp;
       let rh = finalHum;
       let tf = tc * 9 / 5 + 32; 
@@ -251,9 +257,6 @@
       updateUI();
     }
 
-    // --- 防待機 (Keep-Alive) 邏輯 ---
-    // 藍牙喇叭通常在 15~20 分鐘無音訊時會自動關機。
-    // 我們每 10 分鐘發送一個極低頻 (20Hz)、極小聲 (1%) 的音訊訊號來喚醒喇叭，人不一定聽得到，但設備會判定有在播放。
     function pingBluetoothSpeaker() {
       if (!isVoiceEnabled || systemStatus !== 'active') return;
       try {
@@ -264,21 +267,19 @@
         const gainNode = ctx.createGain();
 
         oscillator.type = 'sine';
-        oscillator.frequency.setValueAtTime(20, ctx.currentTime); // 20Hz (超低頻，人類聽覺下限)
-        gainNode.gain.setValueAtTime(0.01, ctx.currentTime); // 1% 極小音量
+        oscillator.frequency.setValueAtTime(20, ctx.currentTime);
+        gainNode.gain.setValueAtTime(0.01, ctx.currentTime);
 
         oscillator.connect(gainNode);
         gainNode.connect(ctx.destination);
 
         oscillator.start();
-        oscillator.stop(ctx.currentTime + 1); // 播放 1 秒鐘
-        console.log("已發送防待機音訊訊號 (Keep-Alive ping)...");
+        oscillator.stop(ctx.currentTime + 1);
       } catch (e) {
         console.log("防待機訊號發送失敗:", e);
       }
     }
 
-    // 播放語音廣播
     function playBroadcast(isManualTest = false) {
       if (!isManualTest && (!isVoiceEnabled || systemStatus !== 'active')) return;
 
@@ -289,13 +290,12 @@
 
       if ('speechSynthesis' in window) {
         const audioEl = document.getElementById('bluetooth-hack-audio');
-        const customViAudioEl = document.getElementById('custom-vi-audio'); // 取得自訂音訊播放器
+        const customViAudioEl = document.getElementById('custom-vi-audio'); 
         
         if (audioEl) {
-          audioEl.play().catch(e => console.log("音訊建立通道被擋 (需要使用者先點擊過畫面):", e));
+          audioEl.play().catch(e => console.log("音訊建立通道被擋:", e));
         }
 
-        // 【關鍵解鎖】：預先極短暫觸發一次自訂音訊器，取得手機的連續播放授權
         if (customViAudioEl) {
           customViAudioEl.play().catch(e => {}); 
           customViAudioEl.pause();
@@ -306,45 +306,39 @@
           const hour = now.getHours();
           const minute = now.getMinutes();
           
-          // 動態產生精確的播報時間 (包含中文與越文)
           const timeZh = minute === 0 ? `${hour} 點整` : `${hour} 點 ${minute} 分`;
           const timeVi = minute === 0 ? `${hour} giờ` : `${hour} giờ ${minute} phút`;
           
-          // 1. 設定中文廣播
           const speechTextZh = `熱危害廣播，現在時間 ${timeZh}。熱危害等級通報，${levelConfigs[currentLevel].speechNote}`;
           const utteranceZh = new SpeechSynthesisUtterance(speechTextZh);
           utteranceZh.lang = 'zh-TW';
           utteranceZh.rate = 0.85; 
           utteranceZh.pitch = 1.0;
           
-          // 當中文念完時的事件觸發
           utteranceZh.onend = () => {
              const customViAudioUrl = levelConfigs[currentLevel].customAudioVi;
              
-             // 檢查是否有設定自訂的越文音檔
              if (customViAudioUrl && customViAudioUrl.trim() !== '') {
-                 // 使用實體 DOM 元素播放，避免手機阻擋
                  customViAudioEl.src = customViAudioUrl;
-                 customViAudioEl.volume = 1.0; // 確保自訂音檔為 100% 最大聲輸出
+                 customViAudioEl.volume = 1.0; 
                  customViAudioEl.play().catch(err => {
                      console.error("自訂音檔播放失敗:", err);
-                     alert("自訂音檔播放失敗！\n可能是 Google 雲端硬碟阻擋了存取，建議更換空間。");
+                     alert("自訂音檔播放失敗！\n請檢查雲端連結。");
                  });
              } else {
-                 // 若無設定，退回使用系統內建的越南語 (TTS)
                  const speechTextVi = `Phát thanh cảnh báo nhiệt, bây giờ là ${timeVi}. Thông báo cấp độ nguy cơ nhiệt, ${levelConfigs[currentLevel].speechNoteVi}`;
                  const utteranceVi = new SpeechSynthesisUtterance(speechTextVi);
                  utteranceVi.lang = 'vi-VN';
                  utteranceVi.rate = 0.85;
                  utteranceVi.pitch = 1.0;
-                 utteranceVi.volume = 1.0; // 確保內建越文為 100% 最大聲輸出
+                 utteranceVi.volume = 1.0; 
                  window.speechSynthesis.speak(utteranceVi);
              }
           };
           
           window.speechSynthesis.cancel(); 
-          utteranceZh.volume = 1.0; // 確保內建中文為 100% 最大聲輸出
-          window.speechSynthesis.speak(utteranceZh); // 開始唸中文，唸完會觸發上方的 onend 事件
+          utteranceZh.volume = 1.0; 
+          window.speechSynthesis.speak(utteranceZh); 
         }, 100);
 
       } else {
@@ -352,92 +346,176 @@
       }
     }
 
-    // 抓取天氣 API
+    // 🌟 氣象署一鍵診斷功能 (加入 GPS 距離計算)
+    async function diagnoseCWA() {
+      const cwaApiKey = CWA_API_KEY.trim();
+      if (!cwaApiKey.startsWith('CWA-')) {
+        alert('錯誤：授權碼格式不正確！\n目前的設定：' + cwaApiKey);
+        return;
+      }
+      try {
+        alert("正在測試實體觀測站連線，並尋找距離您最近的測站...");
+        const cwaUrl = `https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0001-001?Authorization=${cwaApiKey}&t=${Date.now()}`;
+        const res = await fetch(cwaUrl);
+        
+        if (res.status === 401) {
+          alert("❌ 連線失敗 (錯誤 401)\n原因：氣象署拒絕了金鑰。");
+          return;
+        }
+        if (!res.ok) {
+          alert(`❌ 連線失敗 (HTTP ${res.status})`);
+          return;
+        }
+        
+        const data = await res.json();
+        const stations = data?.records?.Station || [];
+        
+        if (stations.length > 0) {
+           let validStations = [];
+           for (let st of stations) {
+             let t = parseFloat(st.WeatherElement?.AirTemperature);
+             let h = parseFloat(st.WeatherElement?.RelativeHumidity);
+             if (!isNaN(t) && t > -50 && !isNaN(h) && h >= 0 && h <= 100) {
+               let lat = null, lon = null;
+               if (st.GeoInfo && st.GeoInfo.Coordinates) {
+                 let wgs84 = st.GeoInfo.Coordinates.find(c => c.CoordinateName === 'WGS84') || st.GeoInfo.Coordinates[0];
+                 if (wgs84) {
+                   lat = parseFloat(wgs84.StationLatitude);
+                   lon = parseFloat(wgs84.StationLongitude);
+                 }
+               }
+               if (lat !== null && lon !== null) {
+                 // 計算經緯度直線距離平方值
+                 let dist = Math.pow(lat - TARGET_LAT, 2) + Math.pow(lon - TARGET_LON, 2);
+                 validStations.push({ name: st.StationName, temp: t, hum: h, dist: dist });
+               }
+             }
+           }
+           
+           // 依據距離由近到遠排序
+           validStations.sort((a, b) => a.dist - b.dist);
+           // 取出前三名最近的測站
+           let top3 = validStations.slice(0, 3).map((s, index) => 
+             `第${index + 1}名：${s.name} (約 ${Math.round(Math.sqrt(s.dist)*111)} 公里) ➔ 氣溫:${s.temp}°C, 濕度:${s.hum}%`
+           ).join('\n');
+
+           alert(`✅ 連線成功！全台共有 ${validStations.length} 個有效測站。\n\n根據您輸入的座標，為您找到最近的 3 個測站：\n\n${top3}\n\n系統將自動採用第一名的資料！`);
+        } else {
+           alert("⚠️ 連線成功但找不到測站資料！");
+        }
+      } catch (error) {
+        alert("🚨 無法連線：\n" + error.message);
+      }
+    }
+
+    // 抓取天氣 API (自動尋標系統：找出距離指定座標最近的有效測站)
     async function fetchWeather() {
       if (!isAutoFetch || systemStatus !== 'active') return;
       
       weatherData.fetching = true;
       weatherData.errorMsg = null;
-      locationNameStr = '📍 嘉義縣 大林鎮 (更新中...)';
+      locationNameStr = '📍 石龜溪工區';
       updateUI();
 
       const cwaApiKey = CWA_API_KEY.trim();
+      let successWithCWA = false;
+      let cwaErrorMessage = '';
 
-      try {
-        if (cwaApiKey && cwaApiKey.startsWith('CWA-')) {
-          // ==========================================
-          // 使用【交通部中央氣象署】開放資料 API
-          // 改為查詢「嘉義」主測站 (因大林站缺乏濕度計，會導致退回國外預測)
-          // ==========================================
-          const cwaUrl = `https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0001-001?Authorization=${cwaApiKey}&StationName=嘉義`;
+      if (cwaApiKey && cwaApiKey.startsWith('CWA-')) {
+        try {
+          const cwaUrl = `https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0001-001?Authorization=${cwaApiKey}&t=${Date.now()}`;
           const res = await fetch(cwaUrl);
-          if (!res.ok) throw new Error(`氣象署 API 錯誤碼 ${res.status}`);
-          const data = await res.json();
           
-          if (data.success === "true" && data.records && data.records.Station && data.records.Station.length > 0) {
-            const station = data.records.Station[0];
+          if (!res.ok) throw new Error(`API 錯誤碼 ${res.status}`);
+          const data = await res.json();
+          const stations = data?.records?.Station || [];
+          
+          if (stations.length > 0) {
+            let validStations = [];
             
-            // 強制轉為數值，避免 API 回傳字串型態導致後續數學運算錯誤
-            const temp = parseFloat(station.WeatherElement.AirTemperature);
-            const hum = parseFloat(station.WeatherElement.RelativeHumidity);
+            // 掃描全台灣所有氣象站
+            for (let st of stations) {
+              let t = parseFloat(st.WeatherElement?.AirTemperature);
+              let h = parseFloat(st.WeatherElement?.RelativeHumidity);
+              
+              // 過濾掉設備故障或沒有濕度計的測站
+              if (!isNaN(t) && t > -50 && !isNaN(h) && h >= 0 && h <= 100) {
+                let lat = null, lon = null;
+                if (st.GeoInfo && st.GeoInfo.Coordinates) {
+                  let wgs84 = st.GeoInfo.Coordinates.find(c => c.CoordinateName === 'WGS84') || st.GeoInfo.Coordinates[0];
+                  if (wgs84) {
+                    lat = parseFloat(wgs84.StationLatitude);
+                    lon = parseFloat(wgs84.StationLongitude);
+                  }
+                }
+                if (lat !== null && lon !== null) {
+                  // 計算距離
+                  let dist = Math.pow(lat - TARGET_LAT, 2) + Math.pow(lon - TARGET_LON, 2);
+                  validStations.push({ station: st, temp: t, hum: h, dist: dist, name: st.StationName });
+                }
+              }
+            }
 
-            // 氣象署設備維護時會回傳特殊值(如 -99)，需做防呆
-            if (isNaN(temp) || isNaN(hum) || temp < -50 || hum < 0) throw new Error('測站目前無有效溫濕度數據');
-
-            weatherData.originalTemp = temp;
-            weatherData.originalHum = hum;
-            locationNameStr = '📍 嘉義縣 大林鎮 (參照嘉義氣象站)';
+            if (validStations.length > 0) {
+              // 按照距離遠近排序，抓取最近的 [0] 號選手
+              validStations.sort((a, b) => a.dist - b.dist);
+              let closestStation = validStations[0];
+              
+              weatherData.originalTemp = closestStation.temp;
+              weatherData.originalHum = closestStation.hum;
+              locationNameStr = '📍 石龜溪工區';
+              successWithCWA = true;
+            } else {
+              throw new Error("全台無有效溫濕度測站");
+            }
           } else {
-             throw new Error('查無資料，請確認授權碼是否正確');
+             throw new Error("回傳無測站列表");
           }
-        } else {
-          // ==========================================
-          // 使用原本的 Open-Meteo 全球預測模型作為備案
-          // ==========================================
-          const lat = 23.6243;
-          const lon = 120.4379;
-          const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature&timezone=auto`;
+        } catch (e) {
+          cwaErrorMessage = e.message;
+          console.warn("氣象署 API 抓取失敗:", e);
+        }
+      }
+
+      // 備援系統 (一樣自動同步您的指定座標)
+      if (!successWithCWA) {
+        try {
+          const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${TARGET_LAT}&longitude=${TARGET_LON}&current=temperature_2m,relative_humidity_2m,apparent_temperature&timezone=auto`;
           const res = await fetch(weatherUrl);
           
           if (!res.ok) throw new Error(`HTTP 錯誤碼 ${res.status}`);
           const data = await res.json();
 
-          if (!data.current) throw new Error('API 回傳資料不完整');
+          if (!data.current) throw new Error('備援 API 回傳資料不完整');
 
-          // 儲存從 API 抓到的原始資料
           weatherData.originalTemp = data.current.temperature_2m;
           weatherData.originalHum = data.current.relative_humidity_2m;
-          locationNameStr = '📍 嘉義縣 大林鎮 (網路預測模型)';
+          locationNameStr = '📍 石龜溪工區';
+        } catch (error) {
+          weatherData.errorMsg = cwaErrorMessage || "所有連線皆失敗";
+          locationNameStr = '📍 石龜溪工區';
         }
-        
-        weatherData.fetching = false;
-
-        // 呼叫計算模組
-        updateWeatherLevel();
-
-      } catch (error) {
-        console.error("抓取天氣失敗:", error);
-        weatherData.fetching = false;
-        weatherData.errorMsg = error.message;
-        locationNameStr = '📍 嘉義縣 大林鎮 (連線異常)';
       }
-      updateUI();
+      
+      weatherData.fetching = false;
+
+      if (!weatherData.errorMsg) {
+         updateWeatherLevel();
+      } else {
+         updateUI();
+      }
     }
 
     function updateClock() {
       const now = new Date();
       const hh = String(now.getHours()).padStart(2, '0');
       const mm = String(now.getMinutes()).padStart(2, '0');
-      // const ss = String(now.getSeconds()).padStart(2, '0'); // 不再需要嚴格比對秒數
       
       timeStr = `${hh}:${mm}`;
 
       const currentMinute = now.getMinutes();
       const timeKey = `${hh}:${mm}`;
       
-      // 【關鍵修正】：移除 ss === '00' 的嚴格限制。
-      // 只要當下分鐘數符合頻率設定，且這個分鐘內還沒廣播過 (lastBroadcastTime !== timeKey)，就立刻觸發！
-      // 這樣即使手機休眠導致計時器延遲跳秒，也不會錯過廣播。
       if (currentMinute % broadcastInterval === 0 && lastBroadcastTime !== timeKey) {
         lastBroadcastTime = timeKey;
         playBroadcast(false); 
@@ -451,7 +529,7 @@
     
     setInterval(updateClock, 1000); 
     setInterval(fetchWeather, 15 * 60 * 1000); 
-    setInterval(pingBluetoothSpeaker, 10 * 60 * 1000); // 啟動防待機計時器：每 10 分鐘發送一次低頻訊號
+    setInterval(pingBluetoothSpeaker, 10 * 60 * 1000); 
 
   </script>
 </body>
