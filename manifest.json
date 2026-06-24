@@ -1,0 +1,16 @@
+{
+  "short_name": "熱危害看板",
+  "name": "熱危害資訊即時看板",
+  "icons": [
+    {
+      "src": "[https://cdn-icons-png.flaticon.com/512/1684/1684375.png](https://cdn-icons-png.flaticon.com/512/1684/1684375.png)",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "./index.html",
+  "background_color": "#FBBF24",
+  "theme_color": "#FBBF24",
+  "display": "standalone",
+  "orientation": "portrait"
+}

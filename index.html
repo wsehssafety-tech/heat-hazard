@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>熱危害資訊即時看板</title>
+  <!-- 引入 Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body id="app-container" class="min-h-screen flex flex-col font-sans transition-colors duration-500 bg-yellow-400">
+
+  <!-- 隱藏的 HTML5 音訊標籤：用來強制啟用 iPhone 藍牙媒體通道 -->
+  <audio id="bluetooth-hack-audio" src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAAAA" preload="auto"></audio>
+  
+  <!-- 新增：用來播放自訂越文的專用音訊標籤，避免手機阻擋背景新建立的音檔 -->
+  <audio id="custom-vi-audio" preload="auto"></audio>
+
+  <!-- 頂部資訊列 -->
+  <div class="bg-gray-200 text-gray-900 px-6 py-4 flex flex-col md:flex-row items-center justify-between border-b-4 border-gray-400 shadow-sm gap-4">
+    <div class="text-2xl md:text-4xl font-bold text-center md:text-left flex items-center gap-4 flex-wrap justify-center">
+      <span id="top-text">目前(--:--)熱危害等級為</span>
+      
+      <!-- 語音開關按鈕 -->
+      <button id="voice-toggle-btn" onclick="toggleVoice()" class="text-base md:text-lg px-4 py-2 rounded-full font-bold shadow-md transition-colors bg-blue-500 text-white hover:bg-blue-600">
+        🔊 語音已啟用 (1小時)
+      </button>
+    </div>
+    
+    <!-- 顯示地點與即時溫濕度 -->
+    <div class="text-center md:text-right bg-white/50 px-4 py-2 rounded-lg shadow-sm">
+      <div class="flex items-center justify-center md:justify-end gap-2">
+        <div id="location-name" class="text-xl font-bold text-gray-800">📍 嘉義縣 大林鎮</div>
+        <button onclick="fetchWeather()" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded shadow-sm border border-gray-300" title="強制重新抓取氣象">🔄</button>
+      </div>
+      <div id="weather-info" class="text-sm text-gray-700 mt-1 font-medium">資料更新中...</div>
+    </div>
+  </div>
+
+  <!-- 主畫面顯示區 -->
+  <div class="flex-1 flex flex-col items-center justify-center p-8 text-center">
+    <h1 id="main-text" class="text-[25vw] md:text-[20vw] font-black tracking-widest drop-shadow-md text-gray-900 leading-none">
+      第2級
+    </h1>
+    <div id="sub-note" class="text-3xl md:text-5xl font-bold mt-8 opacity-80 text-gray-900">
+      (警戒)
+    </div>
+  </div>
+
+  <!-- 開發測試用：模擬控制面板 -->
+  <div class="fixed bottom-4 right-4 bg-white/95 p-4 rounded-xl shadow-2xl text-sm text-gray-800 flex flex-col gap-3 opacity-20 hover:opacity-100 transition-opacity duration-300 border border-gray-200 z-50">
+    <div class="font-bold border-b pb-2 flex items-center justify-between">
+      <span>🛠️ 測試控制台</span>
+      <span class="text-xs text-gray-500 font-normal ml-4">滑鼠移開自動半透明</span>
+    </div>
+    
+    <!-- 手動測試語音按鈕 -->
+    <div class="mb-1">
+      <button onclick="playBroadcast(true)" class="w-full px-3 py-2 bg-blue-100 text-blue-800 rounded font-bold hover:bg-blue-200 border border-blue-300 transition-colors">
+        ▶️ 立即測試播放當前廣播
+      </button>
+    </div>
+    
+    <div>
+      <div class="text-xs text-gray-500 mb-1">切換等級：</div>
+      <div class="flex gap-2">
+        <button onclick="setLevel(1)" class="px-3 py-2 bg-green-400 text-green-900 rounded font-bold hover:bg-green-500">1級</button>
+        <button onclick="setLevel(2)" class="px-3 py-2 bg-yellow-400 text-yellow-900 rounded font-bold hover:bg-yellow-500">2級</button>
+        <button onclick="setLevel(3)" class="px-3 py-2 bg-orange-500 text-white rounded font-bold hover:bg-orange-600">3級</button>
+        <button onclick="setLevel(4)" class="px-3 py-2 bg-red-600 text-white rounded font-bold hover:bg-red-700">4級</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="text-xs text-gray-500 mb-1">自動廣播頻率：</div>
+      <div id="interval-buttons" class="flex gap-2"></div>
+    </div>
+
+    <div class="mt-2 pt-2 border-t border-gray-300">
+      <div class="flex items-start gap-2">
+        <input type="checkbox" id="autoFetch-cb" checked onchange="toggleAutoFetch(this.checked)" class="w-4 h-4 mt-1 cursor-pointer" />
+        <label for="autoFetch-cb" class="text-xs font-bold text-gray-700 cursor-pointer leading-tight">
+          啟用大林即時氣象連線 (每15分鐘自動更新)
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ==========================================
+    // 氣象署 API 授權碼 (直接寫死在程式碼中)
+    // ==========================================
+    const CWA_API_KEY = 'CWA-6516C4AD-3592-4393-9385-97D49A93D1B2';
+
+    // --- 狀態變數 ---
+    let timeStr = '--:--';
+    let currentLevel = 2;
+    let systemStatus = 'active'; 
+    let isAutoFetch = true;
+    let weatherData = { temp: null, humidity: null, fetching: false, errorMsg: null, heatIndex: null };
+    let locationNameStr = '📍 嘉義縣 大林鎮';
+
+    let isVoiceEnabled = true;
+    let broadcastInterval = 60; 
+    let lastBroadcastTime = null;
+
+    // --- 等級與語音設定 ---
+    const levelConfigs = {
+      1: { 
+        text: '第1級', bg: 'bg-green-400', textColor: 'text-green-900', note: '注意', 
+        speechNote: '目前為第1級注意，請隨時補充水分。', 
+        speechNoteVi: 'Hiện tại là mức chú ý cấp độ 1, vui lòng bổ sung nước bất cứ lúc nào.',
+        customAudioVi: '' 
+      },
+      2: { 
+        text: '第2級', bg: 'bg-yellow-400', textColor: 'text-gray-900', note: '警戒', 
+        speechNote: '目前為第2級警戒，請留意身體狀況，適時在陰涼處休息並補充水分，互相注意工作夥伴身體狀況。', 
+        speechNoteVi: 'Hiện tại là cảnh báo cấp độ 2, vui lòng chú ý tình trạng sức khỏe, nghỉ ngơi trong bóng râm, bổ sung nước và chú ý đến sức khỏe của đồng nghiệp.',
+        customAudioVi: 'https://www.dropbox.com/scl/fi/9ed11bmkw77npiv4262gv/2.mp3?rlkey=juj51y28ig59vw5b8la6bfzuq&st=iaf93xhz&raw=1' 
+      },
+      3: { 
+        text: '第3級', bg: 'bg-orange-500', textColor: 'text-orange-950', note: '危險', 
+        speechNote: '目前熱危害已達第三級，請施工人員加強補充水份，每小時休息10分鐘，互相注意工作夥伴身體狀況。', 
+        speechNoteVi: 'Hiện tại đã đạt mức nguy hiểm cấp độ 3, yêu cầu công nhân tăng cường uống nước, mỗi giờ nghỉ ngơi 10 phút, và chú ý đến sức khỏe của đồng nghiệp.',
+        customAudioVi: 'https://www.dropbox.com/scl/fi/lvmav3ajsonn97i7md1v1/3.mp3?rlkey=4p46ac2xdvmj31ch1o4i1vzsw&st=jkb3hiuj&raw=1' 
+      },
+      4: { 
+        text: '第4級', bg: 'bg-red-600', textColor: 'text-white', note: '極度危險', 
+        speechNote: '目前為第4級極度危險！請立即停止非緊急戶外作業，退至室內休息。', 
+        speechNoteVi: 'Hiện tại là cực kỳ nguy hiểm cấp độ 4! Vui lòng lập tức dừng các công việc ngoài trời không khẩn cấp, rút vào trong nhà để nghỉ ngơi.',
+        customAudioVi: 'https://www.dropbox.com/scl/fi/mugofbwj4ixytqu7qf7ku/4.mp3?rlkey=pmrtn66my4mmqn5mgxyrht4bd&st=2qw019rb&raw=1' 
+      },
+    };
+
+    function updateUI() {
+      const appContainer = document.getElementById('app-container');
+      const topTextEl = document.getElementById('top-text');
+      const mainTextEl = document.getElementById('main-text');
+      const subNoteEl = document.getElementById('sub-note');
+      const weatherInfoEl = document.getElementById('weather-info');
+      const voiceToggleBtn = document.getElementById('voice-toggle-btn');
+      const intervalContainer = document.getElementById('interval-buttons');
+
+      let config = levelConfigs[currentLevel] || levelConfigs[2];
+      
+      appContainer.className = `min-h-screen flex flex-col font-sans transition-colors duration-500 ${config.bg}`;
+      mainTextEl.className = `text-[25vw] md:text-[20vw] font-black tracking-widest drop-shadow-md leading-none ${config.textColor}`;
+      subNoteEl.className = `text-3xl md:text-5xl font-bold mt-8 opacity-80 ${config.textColor}`;
+      
+      topTextEl.innerText = `目前(${timeStr})熱危害等級為`;
+      mainTextEl.innerText = config.text;
+      subNoteEl.innerText = `(${config.note})`;
+
+      if (isVoiceEnabled) {
+        let intervalStr = broadcastInterval === 60 ? '1小時' : `${broadcastInterval}分鐘`;
+        voiceToggleBtn.innerText = `🔊 語音已啟用 (${intervalStr})`;
+        voiceToggleBtn.className = "text-base md:text-lg px-4 py-2 rounded-full font-bold shadow-md transition-colors bg-blue-500 text-white hover:bg-blue-600";
+      } else {
+        voiceToggleBtn.innerText = "🔈 點擊啟用定時廣播";
+        voiceToggleBtn.className = "text-base md:text-lg px-4 py-2 rounded-full font-bold shadow-md transition-colors bg-gray-400 text-white hover:bg-gray-500";
+      }
+
+      if (weatherData.fetching) {
+        weatherInfoEl.innerText = '資料更新中...';
+      } else if (weatherData.temp !== null) {
+        weatherInfoEl.innerText = `氣溫 ${weatherData.temp}°C | 濕度 ${weatherData.humidity}% (熱指數 ${weatherData.heatIndex})`;
+      } else if (weatherData.errorMsg) {
+        weatherInfoEl.innerText = `氣象連線異常 (${weatherData.errorMsg})`;
+      } else {
+        weatherInfoEl.innerText = '無法取得氣象或定位資料';
+      }
+
+      document.getElementById('location-name').innerText = locationNameStr;
+
+      intervalContainer.innerHTML = '';
+      [5, 15, 30, 60].forEach(mins => {
+        let btn = document.createElement('button');
+        btn.innerText = mins === 60 ? '1小時' : `${mins}分鐘`;
+        btn.onclick = () => setIntervalSetting(mins);
+        btn.className = broadcastInterval === mins 
+          ? "px-3 py-1 rounded font-bold text-xs transition-colors bg-blue-500 text-white"
+          : "px-3 py-1 rounded font-bold text-xs transition-colors bg-gray-200 text-gray-700 hover:bg-gray-300";
+        intervalContainer.appendChild(btn);
+      });
+    }
+
+    function setLevel(lvl) {
+      currentLevel = lvl;
+      systemStatus = 'active';
+      updateUI();
+    }
+
+    function toggleVoice() {
+      isVoiceEnabled = !isVoiceEnabled;
+      updateUI();
+    }
+
+    function setIntervalSetting(mins) {
+      broadcastInterval = mins;
+      updateUI();
+    }
+
+    function toggleAutoFetch(checked) {
+      isAutoFetch = checked;
+      if (checked) {
+        systemStatus = 'active';
+        fetchWeather();
+      }
+    }
+
+    // 計算熱指數與判斷等級
+    function updateWeatherLevel() {
+      if (weatherData.originalTemp === undefined || weatherData.originalTemp === null) return;
+
+      let finalTemp = parseFloat(weatherData.originalTemp);
+      let finalHum = parseFloat(weatherData.originalHum);
+
+      weatherData.temp = Math.round(finalTemp);
+      weatherData.humidity = Math.round(finalHum);
+
+      let tc = finalTemp;
+      let rh = finalHum;
+      let tf = tc * 9 / 5 + 32; 
+      let heatIndexF = tf;
+
+      if (tf >= 80) {
+        heatIndexF = -42.379 + 2.04901523*tf + 10.14333127*rh - 0.22475541*tf*rh - 0.00683783*tf*tf - 0.05481717*rh*rh + 0.00122874*tf*tf*rh + 0.00085282*tf*rh*rh - 0.00000199*tf*tf*rh*rh;
+        if (rh < 13 && tf >= 80 && tf <= 112) {
+          heatIndexF -= ((13 - rh) / 4) * Math.sqrt((17 - Math.abs(tf - 95)) / 17);
+        } else if (rh > 85 && tf >= 80 && tf <= 87) {
+          heatIndexF += ((rh - 85) / 10) * ((87 - tf) / 5);
+        }
+      } else {
+        heatIndexF = 0.5 * (tf + 61.0 + ((tf - 68.0) * 1.2) + (rh * 0.094));
+      }
+
+      let heatIndexC = (heatIndexF - 32) * 5 / 9;
+      weatherData.heatIndex = heatIndexC.toFixed(1); 
+
+      if (heatIndexC >= 54.4) currentLevel = 4;
+      else if (heatIndexC >= 40.6) currentLevel = 3;
+      else if (heatIndexC >= 32.2) currentLevel = 2;
+      else currentLevel = 1;
+
+      updateUI();
+    }
+
+    function pingBluetoothSpeaker() {
+      if (!isVoiceEnabled || systemStatus !== 'active') return;
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        const ctx = new AudioContext();
+        const oscillator = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(20, ctx.currentTime);
+        gainNode.gain.setValueAtTime(0.01, ctx.currentTime);
+
+        oscillator.connect(gainNode);
+        gainNode.connect(ctx.destination);
+
+        oscillator.start();
+        oscillator.stop(ctx.currentTime + 1);
+      } catch (e) {
+        console.log("防待機訊號發送失敗:", e);
+      }
+    }
+
+    function playBroadcast(isManualTest = false) {
+      if (!isManualTest && (!isVoiceEnabled || systemStatus !== 'active')) return;
+
+      if (currentLevel === 1) {
+        console.log("目前為第1級，依照設定不進行廣播。");
+        return;
+      }
+
+      if ('speechSynthesis' in window) {
+        const audioEl = document.getElementById('bluetooth-hack-audio');
+        const customViAudioEl = document.getElementById('custom-vi-audio'); 
+        
+        if (audioEl) {
+          audioEl.play().catch(e => console.log("音訊建立通道被擋:", e));
+        }
+
+        if (customViAudioEl) {
+          customViAudioEl.play().catch(e => {}); 
+          customViAudioEl.pause();
+        }
+
+        setTimeout(() => {
+          const now = new Date();
+          const hour = now.getHours();
+          const minute = now.getMinutes();
+          
+          const timeZh = minute === 0 ? `${hour} 點整` : `${hour} 點 ${minute} 分`;
+          const timeVi = minute === 0 ? `${hour} giờ` : `${hour} giờ ${minute} phút`;
+          
+          const speechTextZh = `熱危害廣播，現在時間 ${timeZh}。熱危害等級通報，${levelConfigs[currentLevel].speechNote}`;
+          const utteranceZh = new SpeechSynthesisUtterance(speechTextZh);
+          utteranceZh.lang = 'zh-TW';
+          utteranceZh.rate = 0.85; 
+          utteranceZh.pitch = 1.0;
+          
+          utteranceZh.onend = () => {
+             const customViAudioUrl = levelConfigs[currentLevel].customAudioVi;
+             
+             if (customViAudioUrl && customViAudioUrl.trim() !== '') {
+                 customViAudioEl.src = customViAudioUrl;
+                 customViAudioEl.volume = 1.0; 
+                 customViAudioEl.play().catch(err => {
+                     console.error("自訂音檔播放失敗:", err);
+                     alert("自訂音檔播放失敗！\n請檢查雲端連結。");
+                 });
+             } else {
+                 const speechTextVi = `Phát thanh cảnh báo nhiệt, bây giờ là ${timeVi}. Thông báo cấp độ nguy cơ nhiệt, ${levelConfigs[currentLevel].speechNoteVi}`;
+                 const utteranceVi = new SpeechSynthesisUtterance(speechTextVi);
+                 utteranceVi.lang = 'vi-VN';
+                 utteranceVi.rate = 0.85;
+                 utteranceVi.pitch = 1.0;
+                 utteranceVi.volume = 1.0; 
+                 window.speechSynthesis.speak(utteranceVi);
+             }
+          };
+          
+          window.speechSynthesis.cancel(); 
+          utteranceZh.volume = 1.0; 
+          window.speechSynthesis.speak(utteranceZh); 
+        }, 100);
+
+      } else {
+        console.warn('瀏覽器不支援語音合成');
+      }
+    }
+
+    // 抓取天氣 API (含氣象署「嘉義縣專屬預報」與備援雙重機制)
+    async function fetchWeather() {
+      if (!isAutoFetch || systemStatus !== 'active') return;
+      
+      weatherData.fetching = true;
+      weatherData.errorMsg = null;
+      locationNameStr = '📍 嘉義縣 大林鎮 (更新中...)';
+      updateUI();
+
+      const cwaApiKey = CWA_API_KEY.trim();
+      let successWithCWA = false;
+      let cwaErrorMessage = ''; // 新增：記錄氣象署失敗的真正原因
+
+      // 階段 1：嘗試抓取中央氣象署「嘉義縣」專屬鄉鎮預報資料 (F-D0047-029)
+      if (cwaApiKey && cwaApiKey.startsWith('CWA-')) {
+        try {
+          // 加上時間戳記 t 避免瀏覽器抓到舊的錯誤暫存
+          const cwaUrl = `https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-D0047-029?Authorization=${cwaApiKey}&ElementName=T,RH&t=${Date.now()}`;
+          const res = await fetch(cwaUrl);
+          
+          if (!res.ok) {
+            const errData = await res.json().catch(()=>({}));
+            throw new Error(`API 錯誤 ${res.status} ${errData.message || ''}`);
+          }
+          
+          const data = await res.json();
+          
+          // 確保 success 是 true (有時 API 會回傳字串 "true"，有時是布林值 true)
+          let locationData = null;
+          if ((data.success === "true" || data.success === true) && data.records && data.records.locations) {
+            const countyGroup = data.records.locations[0];
+            if (countyGroup && countyGroup.location) {
+              locationData = countyGroup.location.find(loc => loc.locationName === '大林鎮');
+            }
+          }
+
+          if (locationData && locationData.weatherElement) {
+            let temp = null;
+            let hum = null;
+            
+            // 更強健的解析：尋找陣列中第一個有效的數字
+            locationData.weatherElement.forEach(el => {
+              try {
+                if (el.elementName === 'T' || el.elementName === 'RH') {
+                  for (let tBlock of el.time) {
+                    let val = tBlock.elementValue && tBlock.elementValue[0] ? tBlock.elementValue[0].value : null;
+                    if (val !== null && val.trim() !== '' && !isNaN(val)) {
+                      if (el.elementName === 'T') temp = parseFloat(val);
+                      if (el.elementName === 'RH') hum = parseFloat(val);
+                      break; // 找到最近的有效數字就跳出迴圈
+                    }
+                  }
+                }
+              } catch(e) {}
+            });
+
+            if (temp !== null && hum !== null && !isNaN(temp) && !isNaN(hum)) {
+              weatherData.originalTemp = temp;
+              weatherData.originalHum = hum;
+              locationNameStr = '📍 嘉義縣 大林鎮 (與職安署同步)';
+              successWithCWA = true; 
+            } else {
+              throw new Error("數值解析為空");
+            }
+          } else {
+            throw new Error("找不到大林鎮資料");
+          }
+        } catch (e) {
+          cwaErrorMessage = e.message;
+          console.warn("氣象署 API 抓取失敗，準備啟用備援模式:", e.message);
+        }
+      } else {
+        cwaErrorMessage = "無效的授權碼格式";
+      }
+
+      // 階段 2：氣象署連線失敗，自動切換至備用網路氣象模型，確保系統不斷線！
+      if (!successWithCWA) {
+        try {
+          const lat = 23.6243;
+          const lon = 120.4379;
+          const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature&timezone=auto`;
+          const res = await fetch(weatherUrl);
+          
+          if (!res.ok) throw new Error(`HTTP 錯誤碼 ${res.status}`);
+          const data = await res.json();
+
+          if (!data.current) throw new Error('備援 API 回傳資料不完整');
+
+          weatherData.originalTemp = data.current.temperature_2m;
+          weatherData.originalHum = data.current.relative_humidity_2m;
+          
+          // 顯示氣象署失敗的具體原因，方便除錯
+          locationNameStr = `📍 嘉義縣 大林鎮 (備援: ${cwaErrorMessage})`;
+        } catch (error) {
+          console.error("備援抓取也失敗:", error);
+          weatherData.errorMsg = "所有連線皆失敗";
+          locationNameStr = '📍 嘉義縣 大林鎮 (連線異常)';
+        }
+      }
+      
+      weatherData.fetching = false;
+
+      // 如果有抓到資料，則進行計算與畫面更新；反之，直接顯示錯誤畫面
+      if (!weatherData.errorMsg) {
+         updateWeatherLevel();
+      } else {
+         updateUI();
+      }
+    }
+
+    function updateClock() {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      
+      timeStr = `${hh}:${mm}`;
+
+      const currentMinute = now.getMinutes();
+      const timeKey = `${hh}:${mm}`;
+      
+      if (currentMinute % broadcastInterval === 0 && lastBroadcastTime !== timeKey) {
+        lastBroadcastTime = timeKey;
+        playBroadcast(false); 
+      }
+
+      updateUI();
+    }
+
+    updateClock(); 
+    fetchWeather(); 
+    
+    setInterval(updateClock, 1000); 
+    setInterval(fetchWeather, 15 * 60 * 1000); 
+    setInterval(pingBluetoothSpeaker, 10 * 60 * 1000); 
+
+  </script>
+</body>
+</html>
