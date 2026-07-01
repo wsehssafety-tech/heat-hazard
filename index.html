@@ -9,6 +9,12 @@
 </head>
 <body id="app-container" class="min-h-screen flex flex-col font-sans transition-colors duration-500 bg-yellow-400">
 
+  <!-- 新增：內建黑屏省電防休眠遮罩 (點擊任意處解除) -->
+  <div id="black-screen-overlay" onclick="exitBlackScreen()" class="fixed inset-0 bg-black z-[9999] hidden flex-col items-center justify-center cursor-pointer">
+    <div class="text-gray-600 text-2xl font-bold mb-4">🌙 監測廣播系統運作中</div>
+    <div class="text-gray-700 text-lg">防休眠模式啟動中，點擊螢幕任意處喚醒</div>
+  </div>
+
   <!-- 隱藏的 HTML5 音訊標籤：用來強制啟用 iPhone 藍牙媒體通道 -->
   <audio id="bluetooth-hack-audio" src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAAAA" preload="auto"></audio>
   
@@ -90,9 +96,76 @@
         🩺 氣象署連線診斷
       </button>
     </div>
+    
+    <!-- 新增：啟動黑屏模式按鈕 -->
+    <div class="mt-2 pt-2 border-t border-gray-300">
+      <button onclick="enterBlackScreen()" class="w-full px-3 py-2 bg-gray-800 text-yellow-400 rounded font-bold hover:bg-gray-900 shadow-md transition-colors">
+        🌙 啟動黑屏省電模式 (防休眠)
+      </button>
+    </div>
   </div>
 
   <script>
+    // ==========================================
+    // 網頁原生防休眠與黑屏系統 (WakeLock API)
+    // ==========================================
+    let wakeLock = null;
+
+    async function requestWakeLock() {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+          console.log('✅ 成功取得螢幕喚醒鎖定！手機將不會自動休眠。');
+          
+          wakeLock.addEventListener('release', () => {
+            console.log('⚠️ 螢幕喚醒鎖定被系統釋放了');
+          });
+        } else {
+          console.warn('您的瀏覽器不支援 WakeLock API，請盡量將螢幕休眠時間調到最長。');
+        }
+      } catch (err) {
+        console.error(`WakeLock 錯誤: ${err.name}, ${err.message}`);
+      }
+    }
+
+    function enterBlackScreen() {
+      // 顯示全黑遮罩
+      document.getElementById('black-screen-overlay').classList.remove('hidden');
+      document.getElementById('black-screen-overlay').classList.add('flex');
+      
+      // 啟動防休眠鎖定
+      requestWakeLock();
+      
+      // 給個小提示音確認進入狀態
+      if ('speechSynthesis' in window) {
+         let u = new SpeechSynthesisUtterance("已進入黑屏防休眠模式");
+         u.lang = 'zh-TW';
+         u.volume = 0.5;
+         window.speechSynthesis.speak(u);
+      }
+    }
+
+    function exitBlackScreen() {
+      // 隱藏全黑遮罩
+      document.getElementById('black-screen-overlay').classList.add('hidden');
+      document.getElementById('black-screen-overlay').classList.remove('flex');
+      
+      // 釋放防休眠鎖定
+      if (wakeLock !== null) {
+        wakeLock.release().then(() => {
+          wakeLock = null;
+          console.log('✅ 已解除螢幕喚醒鎖定');
+        });
+      }
+    }
+
+    // 當手機切換APP再切回來時，若處於黑屏模式，要重新索取一次免死金牌
+    document.addEventListener('visibilitychange', async () => {
+      if (wakeLock !== null && document.visibilityState === 'visible') {
+        await requestWakeLock();
+      }
+    });
+
     // ==========================================
     // 氣象署 API 授權碼
     // ==========================================
